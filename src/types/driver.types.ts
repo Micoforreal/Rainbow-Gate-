@@ -3,7 +3,7 @@ export interface VerifyResult {
   reason?:  string;  // human-readable failure description when valid === false
 }
 
-// SettleResult is reserved for Phase 2
 export interface SettleResult {
-  txid: string;
+  txid:    string;
+  status:  'submitted' | 'confirmed' | 'failed';
 }

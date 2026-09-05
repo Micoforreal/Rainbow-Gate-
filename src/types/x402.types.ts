@@ -33,13 +33,23 @@ const MessageObjSchema = z.object({
   recent_blockhash:  z.string().min(1),          // base58-encoded recent blockhash
 });
 
-// --- Root payload schema (base64 decoded → JSON parsed → validated) ---
+// --- Root payload schemas ---
+
+// Base58 regex approx (44 chars) or Hex 64 chars
+const PubkeyStringSchema = z.string().refine(
+  (val) => /^[0-9a-fA-F]{64}$/.test(val) || /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(val),
+  { message: "Must be a 64-char hex string or a 43/44-char Base58 string" }
+);
 
 export const PaymentPayloadSchema = z.object({
   requirements:  RequirementsSchema,
-  payerAddress:  z.string().min(1),   // payer Bitcoin taproot address (bc1p...)
+  payerAddress:  PubkeyStringSchema,
   signature:     z.string().min(1),   // base64-encoded client wallet signature
   messageObj:    MessageObjSchema,
+  nonce:         z.string().uuid(),
 });
 
 export type PaymentPayload = z.infer<typeof PaymentPayloadSchema>;
+
+export const SettlePayloadSchema = PaymentPayloadSchema; // Same shape for now
+export type SettlePayload = z.infer<typeof SettlePayloadSchema>;

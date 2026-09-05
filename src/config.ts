@@ -6,6 +6,7 @@ dotenv.config();
 const ConfigSchema = z.object({
   PORT: z.string().default('3000'),
   ARCH_RPC_URL: z.string().url(),
+  REDIS_URL: z.string().url().optional(),
 });
 
 const parsed = ConfigSchema.safeParse(process.env);

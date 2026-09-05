@@ -1,3 +1,4 @@
 node_modules
 archContext
 dist
+.env

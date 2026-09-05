@@ -1,6 +1,8 @@
-import { RpcConnection } from '@saturnbtcio/arch-sdk';
+import { RpcConnection, PubkeyUtil, MessageUtil, type SanitizedMessage, type RuntimeTransaction, type Message } from '@saturnbtcio/arch-sdk';
+import { schnorr } from '@noble/secp256k1';
+import bs58 from 'bs58';
 import type { X402VerifierDriver } from '../driver.interface.js';
-import type { PaymentPayload } from '../../types/x402.types.js';
+import type { PaymentPayload, SettlePayload } from '../../types/x402.types.js';
 import type { VerifyResult, SettleResult } from '../../types/driver.types.js';
 
 export class ArchVerifierDriver implements X402VerifierDriver {
@@ -11,14 +13,21 @@ export class ArchVerifierDriver implements X402VerifierDriver {
   }
 
   /**
-   * Helper to convert a Bitcoin taproot address (bc1p...) to an Arch Pubkey (32 bytes).
-   * TODO: Implement proper bech32m decoding here or rely on the client to send the hex pubkey.
-   * For now, this is a placeholder that returns a dummy 32-byte array to satisfy the type system.
+   * Helper to convert a Base58 or Hex string to an Arch Pubkey (32 bytes).
    */
   private resolveAddressToPubkey(address: string): Uint8Array {
-    // In a real implementation, you would decode the taproot address (bech32m) to extract the 32-byte x-only pubkey.
-    // Or if the client provides the base58/hex pubkey directly in the payload, you would parse it here.
-    return new Uint8Array(32); 
+    if (address.length === 64 && /^[0-9a-fA-F]{64}$/.test(address)) {
+      return PubkeyUtil.fromHex(address);
+    }
+    try {
+      const decoded = bs58.decode(address);
+      if (decoded.length !== 32) {
+        throw new Error(`Invalid Base58 pubkey length: ${decoded.length}`);
+      }
+      return decoded;
+    } catch (error) {
+      throw new Error(`Invalid pubkey format for address: ${address}`);
+    }
   }
 
   async verify(payload: PaymentPayload): Promise<VerifyResult> {
@@ -44,10 +53,7 @@ export class ArchVerifierDriver implements X402VerifierDriver {
       }
 
       // 3. Signature validation (off-chain)
-      // Verify payload.signature against payload.messageObj using the payer's pubkey.
-      // TODO: Implement secp256k1/schnorr signature verification here.
-      // This is pure cryptography and does not require an RPC call.
-      const isSignatureValid = true; // Placeholder for actual verification logic
+      const isSignatureValid = await this.verifySignature(payload);
       
       if (!isSignatureValid) {
         return { valid: false, reason: 'Invalid signature.' };
@@ -59,7 +65,70 @@ export class ArchVerifierDriver implements X402VerifierDriver {
     }
   }
 
-  async settle(payload: PaymentPayload): Promise<SettleResult> {
-    throw new Error('Settle is not implemented in Phase 1.');
+  private async verifySignature(payload: PaymentPayload): Promise<boolean> {
+    const message: Message = {
+      signers: payload.messageObj.signers.map(s => this.resolveAddressToPubkey(s)),
+      instructions: payload.messageObj.instructions.map(ix => ({
+        program_id: PubkeyUtil.fromHex(ix.program_id),
+        accounts: ix.accounts.map(a => ({
+          pubkey: this.resolveAddressToPubkey(a.pubkey),
+          is_signer: a.is_signer,
+          is_writable: a.is_writable,
+        })),
+        data: new Uint8Array(ix.data),
+      })),
+    };
+    
+    const msgBytes = MessageUtil.serialize(message);
+    const sigBytes = Buffer.from(payload.signature, 'base64');
+    const pubkeyBytes = this.resolveAddressToPubkey(payload.payerAddress);
+
+    return schnorr.verify(sigBytes, msgBytes, pubkeyBytes);
+  }
+
+  async settle(payload: SettlePayload): Promise<SettleResult> {
+    // 1. Reconstruct RuntimeTransaction
+    const pubkey = this.resolveAddressToPubkey(payload.payerAddress);
+    const sigBytes = Buffer.from(payload.signature, 'base64');
+
+    const sanitizedMsg: SanitizedMessage = {
+      header: {
+        num_required_signatures: 1,
+        num_readonly_signed_accounts: 0,
+        num_readonly_unsigned_accounts: 0,
+      },
+      account_keys: [pubkey, this.resolveAddressToPubkey(payload.requirements.payTo)],
+      recent_blockhash: bs58.decode(payload.messageObj.recent_blockhash),
+      instructions: payload.messageObj.instructions.map((ix) => ({
+        program_id_index: 0, // Assumption based on standard structure
+        accounts: ix.accounts.map((_, i) => i), 
+        data: new Uint8Array(ix.data),
+      })),
+    };
+
+    const runtimeTx: RuntimeTransaction = {
+      version: 0,
+      signatures: [sigBytes],
+      message: sanitizedMsg,
+    };
+
+    try {
+      // 2. Broadcast
+      const txid = await this.rpc.sendTransaction(runtimeTx);
+
+      // 3. Poll for confirmation (up to 10 attempts x 2s)
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const processed = await this.rpc.getProcessedTransaction(txid);
+        if ((processed as any)?.status?.Processed || (processed as any)?.status === 'Processed') {
+          return { txid, status: 'confirmed' };
+        }
+      }
+
+      return { txid, status: 'submitted' };
+    } catch (error: any) {
+      console.error('Settle error:', error);
+      return { txid: '', status: 'failed' };
+    }
   }
 }
