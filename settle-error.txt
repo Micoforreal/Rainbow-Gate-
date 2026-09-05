@@ -1,0 +1,8 @@
+"Transaction Verification Failed, check transaction for format"
+
+Error: Transaction Verification Failed, check transaction for format
+    at processResult (C:\Users\mjjam\justFacilitate\node_modules\@saturnbtcio\arch-sdk\dist\index.js:359:11)
+    at RpcConnection.sendTransaction (C:\Users\mjjam\justFacilitate\node_modules\@saturnbtcio\arch-sdk\dist\index.js:420:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ArchVerifierDriver.settle (C:\Users\mjjam\justFacilitate\src\drivers\arch\arch.driver.ts:151:20)
+    at async <anonymous> (C:\Users\mjjam\justFacilitate\src\routes\settle.route.ts:66:30)

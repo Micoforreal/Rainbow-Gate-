@@ -3,6 +3,7 @@ import { SettlePayloadSchema } from '../types/x402.types.js';
 import { verifyPayment } from '../services/payment.service.js';
 import type { X402VerifierDriver } from '../drivers/driver.interface.js';
 import type { NonceService } from '../services/nonce.service.js';
+import { error } from 'console';
 
 export function createSettleRoute(driver: X402VerifierDriver, nonceService: NonceService): Router {
   const router = Router();
@@ -66,7 +67,8 @@ export function createSettleRoute(driver: X402VerifierDriver, nonceService: Nonc
         const settleResult = await driver.settle(payload);
         if(settleResult.status === 'failed') {
             await nonceService.unmark(payload.nonce);
-            res.status(500).json({ error: 'Failed to settle payment on Arch network.' });
+            console.log(settleResult)
+            res.status(500).json({ error: settleResult });
             return;
         }
         res.status(200).json(settleResult);

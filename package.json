@@ -14,12 +14,15 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@arch-network/arch-sdk": "^0.0.28",
     "@noble/secp256k1": "^3.2.0",
     "@saturnbtcio/arch-sdk": "^0.0.24",
+    "bech32": "^2.0.0",
     "bs58": "^6.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "ioredis": "^6.0.0",
+    "nodemon": "^3.1.14",
     "zod": "^4.5.4"
   },
   "devDependencies": {
