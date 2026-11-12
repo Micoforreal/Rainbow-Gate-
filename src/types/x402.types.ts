@@ -1,55 +1,92 @@
 import { z } from 'zod';
 
-// --- Sub-schemas ---
-
-const PriceSchema = z.object({
-  amount: z.string().min(1),          // e.g. "10000" — kept as string per spec
-  asset: z.literal('BTC'),
+export const PriceSchema = z.object({
+  amount: z.string().min(1), // atomic units as string (e.g. "1000000" for 1 USDC)
+  asset: z.string().min(1),
 });
 
-const RequirementsSchema = z.object({
-  scheme:   z.literal('exact'),
-  network:  z.string().min(1),        // e.g. "arch:testnet"
-  payTo:    z.string().min(1),        // merchant Bitcoin taproot address (bc1p...)
-  price:    PriceSchema,
-  resource: z.string().url(),         // the protected resource URL
+export const PaymentRequirementsSchema = z.object({
+  scheme: z.string().min(1),
+  network: z.string().min(1),
+  amount: z.string().optional(),
+  asset: z.string().optional(),
+  payTo: z.string().min(1),
+  price: PriceSchema.optional(),
+  resource: z.string().optional(),
+  maxTimeoutSeconds: z.number().optional(),
+  paymentId: z.string().optional(),
+  merchantId: z.string().optional(),
+  extra: z.record(z.string(), z.any()).optional(),
+}).passthrough().transform((data) => {
+  // Normalize price and amount/asset so both formats are accessible
+  const amount = data.amount ?? data.price?.amount ?? '';
+  const asset = data.asset ?? data.price?.asset ?? '';
+  return {
+    ...data,
+    amount,
+    asset,
+    price: { amount, asset },
+  };
 });
 
-const AccountMetaSchema = z.object({
-  pubkey:      z.string().min(1),     // Bitcoin taproot address or base58 pubkey
-  is_signer:   z.boolean(),
-  is_writable: z.boolean(),
+export type PaymentRequirements = z.infer<typeof PaymentRequirementsSchema>;
+
+// EVM Payload
+export const EVMAuthorizationSchema = z.object({
+  from: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  value: z.string().min(1),
+  validAfter: z.union([z.string(), z.number()]).transform((v) => BigInt(v)),
+  validBefore: z.union([z.string(), z.number()]).transform((v) => BigInt(v)),
+  nonce: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
 });
 
-const InstructionSchema = z.object({
-  program_id: z.string().min(1),      // system program or APL token program id
-  accounts:   z.array(AccountMetaSchema),
-  data:       z.array(z.number()),    // byte array, e.g. [15, 16, 17, 18]
+export const EVMPayloadSchema = z.object({
+  signature: z.string().min(1),
+  authorization: EVMAuthorizationSchema,
 });
 
-const MessageObjSchema = z.object({
-  signers:           z.array(z.string().min(1)), // array of payer taproot addresses
-  instructions:      z.array(InstructionSchema),
-  recent_blockhash:  z.string().min(1),          // base58-encoded recent blockhash
+// SVM (Solana) Payload
+export const SVMPayloadSchema = z.object({
+  transaction: z.string().min(1), // Base64 encoded versioned transaction
 });
 
-// --- Root payload schemas ---
-
-// Base58 regex approx (44 chars) or Hex 64 chars
-const PubkeyStringSchema = z.string().refine(
-  (val) => /^[0-9a-fA-F]{64}$/.test(val) || /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(val),
-  { message: "Must be a 64-char hex string or a 43/44-char Base58 string" }
-);
-
-export const PaymentPayloadSchema = z.object({
-  requirements:  RequirementsSchema,
-  payerAddress:  PubkeyStringSchema,
-  signature:     z.string().min(1),   // base64-encoded client wallet signature
-  messageObj:    MessageObjSchema,
-  nonce:         z.string().uuid(),
+// NEAR NEP-366 Delegate Payload
+export const NEARDelegateActionSchema = z.object({
+  senderId: z.string().min(1),
+  receiverId: z.string().min(1),
+  actions: z.array(z.any()),
+  nonce: z.union([z.string(), z.number(), z.bigint()]),
+  maxBlockHeight: z.union([z.string(), z.number(), z.bigint()]),
+  publicKey: z.string().min(1),
 });
 
-export type PaymentPayload = z.infer<typeof PaymentPayloadSchema>;
+export const NEARPayloadSchema = z.object({
+  signedDelegate: z.object({
+    delegateAction: NEARDelegateActionSchema,
+    signature: z.string().min(1),
+  }).optional(),
+  // or flat fields
+  delegate: z.any().optional(),
+  signature: z.string().optional(),
+});
 
-export const SettlePayloadSchema = PaymentPayloadSchema; // Same shape for now
-export type SettlePayload = z.infer<typeof SettlePayloadSchema>;
+// Unified standard x402 payment payload schema
+export const StandardPaymentPayloadSchema = z.object({
+  x402Version: z.number().default(2),
+  scheme: z.string().default('exact'),
+  network: z.string().min(1),
+  resource: z.any().optional(),
+  accepted: PaymentRequirementsSchema.optional(),
+  payload: z.any(),
+});
+
+// Facilitator Request Bodies for /verify and /settle
+export const VerifyRequestBodySchema = z.object({
+  x402Version: z.number().optional().default(2),
+  paymentPayload: z.any(),
+  paymentRequirements: z.any().optional(),
+  paymentId: z.string().optional(),
+});
+
+export const SettleRequestBodySchema = VerifyRequestBodySchema;

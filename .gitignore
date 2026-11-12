@@ -2,3 +2,6 @@ node_modules
 archContext
 dist
 .env
+payer-near.json
+*.key.json
+*.sqlite
